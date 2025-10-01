@@ -12,6 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+
 	"portfolio-app/internal/models"
 )
 
@@ -28,12 +29,25 @@ func (m *MockStrategyService) CreateStrategy(ctx context.Context, req *models.Cr
 	return args.Get(0).(*models.Strategy), args.Error(1)
 }
 
+func (m *MockStrategyService) GetUserStrategies(ctx context.Context, userID uuid.UUID) ([]*models.Strategy, error) {
+	args := m.Called(ctx, userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*models.Strategy), args.Error(1)
+}
+
 func (m *MockStrategyService) UpdateStrategy(ctx context.Context, id uuid.UUID, req *models.UpdateStrategyRequest, userID uuid.UUID) (*models.Strategy, error) {
 	args := m.Called(ctx, id, req, userID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*models.Strategy), args.Error(1)
+}
+
+func (m *MockStrategyService) UpdateStockEligibility(ctx context.Context, strategyID, stockID uuid.UUID, eligible bool, userID uuid.UUID) error {
+	args := m.Called(ctx, strategyID, stockID, eligible, userID)
+	return args.Error(0)
 }
 
 func (m *MockStrategyService) GetStrategy(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*models.Strategy, error) {
@@ -44,18 +58,8 @@ func (m *MockStrategyService) GetStrategy(ctx context.Context, id uuid.UUID, use
 	return args.Get(0).(*models.Strategy), args.Error(1)
 }
 
-func (m *MockStrategyService) GetUserStrategies(ctx context.Context, userID uuid.UUID) ([]*models.Strategy, error) {
-	args := m.Called(ctx, userID)
-	return args.Get(0).([]*models.Strategy), args.Error(1)
-}
-
 func (m *MockStrategyService) DeleteStrategy(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
 	args := m.Called(ctx, id, userID)
-	return args.Error(0)
-}
-
-func (m *MockStrategyService) UpdateStockEligibility(ctx context.Context, strategyID, stockID uuid.UUID, eligible bool, userID uuid.UUID) error {
-	args := m.Called(ctx, strategyID, stockID, eligible, userID)
 	return args.Error(0)
 }
 
@@ -64,24 +68,22 @@ func (m *MockStrategyService) ValidateStrategyWeights(ctx context.Context, userI
 	return args.Error(0)
 }
 
-func TestStrategyHandler_CreateStrategy(t *testing.T) {
+// setupStrategyTestApp creates a test Fiber app with user context middleware for strategy tests
+func setupStrategyTestApp() *fiber.App {
 	app := fiber.New()
-	mockService := new(MockStrategyService)
-	handler := NewStrategyHandler(mockService)
+	// Add middleware to set user context
+	app.Use(func(c *fiber.Ctx) error {
+		c.Locals("userID", uuid.New())
+		return c.Next()
+	})
+	return app
+}
 
-	app.Post("/strategies", handler.CreateStrategy)
-
+func TestStrategyHandler_CreateStrategy(t *testing.T) {
 	t.Run("successful creation", func(t *testing.T) {
 		mockService := new(MockStrategyService)
 		handler := NewStrategyHandler(mockService)
-		app := fiber.New()
-		
-		// Add middleware to set user context
-		app.Use(func(c *fiber.Ctx) error {
-			c.Locals("userID", uuid.New().String())
-			return c.Next()
-		})
-		
+		app := setupStrategyTestApp()
 		app.Post("/strategies", handler.CreateStrategy)
 
 		reqBody := map[string]interface{}{
@@ -113,7 +115,7 @@ func TestStrategyHandler_CreateStrategy(t *testing.T) {
 	t.Run("invalid request body", func(t *testing.T) {
 		mockService := new(MockStrategyService)
 		handler := NewStrategyHandler(mockService)
-		app := fiber.New()
+		app := setupStrategyTestApp()
 		app.Post("/strategies", handler.CreateStrategy)
 
 		req := httptest.NewRequest("POST", "/strategies", bytes.NewReader([]byte("invalid json")))
@@ -127,7 +129,7 @@ func TestStrategyHandler_CreateStrategy(t *testing.T) {
 	t.Run("validation error", func(t *testing.T) {
 		mockService := new(MockStrategyService)
 		handler := NewStrategyHandler(mockService)
-		app := fiber.New()
+		app := setupStrategyTestApp()
 		app.Post("/strategies", handler.CreateStrategy)
 
 		validationErr := &models.ValidationError{
@@ -159,31 +161,25 @@ func TestStrategyHandler_GetStrategies(t *testing.T) {
 	t.Run("successful retrieval", func(t *testing.T) {
 		mockService := new(MockStrategyService)
 		handler := NewStrategyHandler(mockService)
-		app := fiber.New()
+		app := setupStrategyTestApp()
 		app.Get("/strategies", handler.GetStrategies)
 
-		strategies := []*models.Strategy{
+		expectedStrategies := []*models.Strategy{
 			{
 				ID:          uuid.New(),
 				Name:        "Strategy 1",
 				WeightMode:  models.WeightModePercent,
 				WeightValue: decimal.NewFromInt(50),
 			},
-			{
-				ID:          uuid.New(),
-				Name:        "Strategy 2",
-				WeightMode:  models.WeightModeBudget,
-				WeightValue: decimal.NewFromInt(1000),
-			},
 		}
 
-		mockService.On("GetUserStrategies", mock.Anything, mock.AnythingOfType("uuid.UUID")).Return(strategies, nil)
+		mockService.On("GetUserStrategies", mock.Anything, mock.AnythingOfType("uuid.UUID")).Return(expectedStrategies, nil)
 
 		req := httptest.NewRequest("GET", "/strategies", nil)
 		resp, err := app.Test(req)
-
 		assert.NoError(t, err)
 		assert.Equal(t, fiber.StatusOK, resp.StatusCode)
+
 		mockService.AssertExpectations(t)
 	})
 }
@@ -192,7 +188,7 @@ func TestStrategyHandler_UpdateStrategyWeight(t *testing.T) {
 	t.Run("successful weight update", func(t *testing.T) {
 		mockService := new(MockStrategyService)
 		handler := NewStrategyHandler(mockService)
-		app := fiber.New()
+		app := setupStrategyTestApp()
 		app.Put("/strategies/:id/weight", handler.UpdateStrategyWeight)
 
 		strategyID := uuid.New()
@@ -200,7 +196,7 @@ func TestStrategyHandler_UpdateStrategyWeight(t *testing.T) {
 			ID:          strategyID,
 			Name:        "Test Strategy",
 			WeightMode:  models.WeightModePercent,
-			WeightValue: decimal.NewFromInt(75),
+			WeightValue: decimal.NewFromFloat(75.0),
 		}
 
 		mockService.On("UpdateStrategy", mock.Anything, strategyID, mock.AnythingOfType("*models.UpdateStrategyRequest"), mock.AnythingOfType("uuid.UUID")).Return(updatedStrategy, nil)
@@ -223,7 +219,7 @@ func TestStrategyHandler_UpdateStrategyWeight(t *testing.T) {
 	t.Run("invalid strategy ID", func(t *testing.T) {
 		mockService := new(MockStrategyService)
 		handler := NewStrategyHandler(mockService)
-		app := fiber.New()
+		app := setupStrategyTestApp()
 		app.Put("/strategies/:id/weight", handler.UpdateStrategyWeight)
 
 		reqBody := map[string]interface{}{
@@ -242,10 +238,11 @@ func TestStrategyHandler_UpdateStrategyWeight(t *testing.T) {
 	t.Run("invalid weight value", func(t *testing.T) {
 		mockService := new(MockStrategyService)
 		handler := NewStrategyHandler(mockService)
-		app := fiber.New()
+		app := setupStrategyTestApp()
 		app.Put("/strategies/:id/weight", handler.UpdateStrategyWeight)
 
 		strategyID := uuid.New()
+
 		reqBody := map[string]interface{}{
 			"weight_value": "invalid",
 		}
@@ -264,12 +261,11 @@ func TestStrategyHandler_UpdateStockEligibility(t *testing.T) {
 	t.Run("successful eligibility update", func(t *testing.T) {
 		mockService := new(MockStrategyService)
 		handler := NewStrategyHandler(mockService)
-		app := fiber.New()
-		app.Put("/strategies/:id/stocks/:stockId", handler.UpdateStockEligibility)
+		app := setupStrategyTestApp()
+		app.Put("/strategies/:id/stocks/:stockId/eligibility", handler.UpdateStockEligibility)
 
 		strategyID := uuid.New()
 		stockID := uuid.New()
-
 		mockService.On("UpdateStockEligibility", mock.Anything, strategyID, stockID, true, mock.AnythingOfType("uuid.UUID")).Return(nil)
 
 		reqBody := map[string]interface{}{
@@ -277,7 +273,7 @@ func TestStrategyHandler_UpdateStockEligibility(t *testing.T) {
 		}
 
 		body, _ := json.Marshal(reqBody)
-		req := httptest.NewRequest("PUT", "/strategies/"+strategyID.String()+"/stocks/"+stockID.String(), bytes.NewReader(body))
+		req := httptest.NewRequest("PUT", "/strategies/"+strategyID.String()+"/stocks/"+stockID.String()+"/eligibility", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 
 		resp, err := app.Test(req)
@@ -290,12 +286,11 @@ func TestStrategyHandler_UpdateStockEligibility(t *testing.T) {
 	t.Run("strategy not found", func(t *testing.T) {
 		mockService := new(MockStrategyService)
 		handler := NewStrategyHandler(mockService)
-		app := fiber.New()
-		app.Put("/strategies/:id/stocks/:stockId", handler.UpdateStockEligibility)
+		app := setupStrategyTestApp()
+		app.Put("/strategies/:id/stocks/:stockId/eligibility", handler.UpdateStockEligibility)
 
 		strategyID := uuid.New()
 		stockID := uuid.New()
-
 		mockService.On("UpdateStockEligibility", mock.Anything, strategyID, stockID, true, mock.AnythingOfType("uuid.UUID")).Return(&models.NotFoundError{Resource: "strategy"})
 
 		reqBody := map[string]interface{}{
@@ -303,7 +298,7 @@ func TestStrategyHandler_UpdateStockEligibility(t *testing.T) {
 		}
 
 		body, _ := json.Marshal(reqBody)
-		req := httptest.NewRequest("PUT", "/strategies/"+strategyID.String()+"/stocks/"+stockID.String(), bytes.NewReader(body))
+		req := httptest.NewRequest("PUT", "/strategies/"+strategyID.String()+"/stocks/"+stockID.String()+"/eligibility", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 
 		resp, err := app.Test(req)

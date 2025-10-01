@@ -33,7 +33,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Run backup on server
-      uses: appleboy/ssh-action@v1.0.0
+      uses: appleboy/ssh-action@v1.2.2
       with:
         host: ${{ matrix.environment == 'staging' && secrets.STAGING_HOST || secrets.PROD_HOST }}
         username: ${{ matrix.environment == 'staging' && secrets.STAGING_USER || secrets.PROD_USER }}
@@ -44,7 +44,7 @@ jobs:
           ./scripts/backup.sh
 
     - name: Upload backup to cloud storage
-      uses: appleboy/ssh-action@v1.0.0
+      uses: appleboy/ssh-action@v1.2.2
       if: matrix.environment == 'production'
       with:
         host: ${{ secrets.PROD_HOST }}
@@ -68,7 +68,7 @@ jobs:
           find backups/ -name "*.tar.gz" -mtime +7 -delete
 
     - name: Verify backup integrity
-      uses: appleboy/ssh-action@v1.0.0
+      uses: appleboy/ssh-action@v1.2.2
       with:
         host: ${{ matrix.environment == 'staging' && secrets.STAGING_HOST || secrets.PROD_HOST }}
         username: ${{ matrix.environment == 'staging' && secrets.STAGING_USER || secrets.PROD_USER }}

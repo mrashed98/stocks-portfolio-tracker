@@ -1,0 +1,339 @@
+name: CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Build and push Docker images
+  build-and-push:
+    name: Build and Push Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      backend-image: ${{ steps.meta-backend.outputs.tags }}
+      frontend-image: ${{ steps.meta-frontend.outputs.tags }}
+      backend-digest: ${{ steps.build-backend.outputs.digest }}
+      frontend-digest: ${{ steps.build-frontend.outputs.digest }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata for backend
+      id: meta-backend
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha,prefix={{branch}}-
+
+    - name: Extract metadata for frontend
+      id: meta-frontend
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha,prefix={{branch}}-
+
+    - name: Build and push backend image
+      id: build-backend
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        file: ./backend/Dockerfile
+        push: true
+        tags: ${{ steps.meta-backend.outputs.tags }}
+        labels: ${{ steps.meta-backend.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64,linux/arm64
+
+    - name: Build and push frontend image
+      id: build-frontend
+      uses: docker/build-push-action@v5
+      with:
+        context: ./frontend
+        file: ./frontend/Dockerfile
+        push: true
+        tags: ${{ steps.meta-frontend.outputs.tags }}
+        labels: ${{ steps.meta-frontend.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64,linux/arm64
+
+  # Deploy to staging
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'staging'
+    environment: staging
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up deployment environment
+      run: |
+        # Create staging environment file
+        cat > .env.staging << EOF
+        DB_NAME=portfolio_db_staging
+        DB_USER=portfolio_user_staging
+        DB_PASSWORD=${{ secrets.STAGING_DB_PASSWORD }}
+        REDIS_PASSWORD=${{ secrets.STAGING_REDIS_PASSWORD }}
+        JWT_SECRET=${{ secrets.STAGING_JWT_SECRET }}
+        MARKET_DATA_API_KEY=${{ secrets.MARKET_DATA_API_KEY }}
+        API_URL=https://staging.your-domain.com/api
+        BACKEND_IMAGE=${{ needs.build-and-push.outputs.backend-image }}
+        FRONTEND_IMAGE=${{ needs.build-and-push.outputs.frontend-image }}
+        EOF
+
+    - name: Deploy to staging server
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.STAGING_HOST }}
+        username: ${{ secrets.STAGING_USER }}
+        key: ${{ secrets.STAGING_SSH_KEY }}
+        port: ${{ secrets.STAGING_PORT }}
+        script: |
+          # Navigate to application directory
+          cd /opt/portfolio-app
+          
+          # Pull latest code
+          git pull origin main
+          
+          # Update environment
+          cp .env.staging .env.prod.local
+          
+          # Login to container registry
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          
+          # Pull latest images
+          docker pull ${{ needs.build-and-push.outputs.backend-image }}
+          docker pull ${{ needs.build-and-push.outputs.frontend-image }}
+          
+          # Update docker-compose with new images
+          sed -i "s|portfolio-backend:.*|${{ needs.build-and-push.outputs.backend-image }}|g" docker-compose.prod.yml
+          sed -i "s|portfolio-frontend:.*|${{ needs.build-and-push.outputs.frontend-image }}|g" docker-compose.prod.yml
+          
+          # Deploy
+          ./scripts/deploy-prod.sh
+          
+          # Run health check
+          sleep 30
+          curl -f http://localhost/health || exit 1
+
+    - name: Run staging tests
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.STAGING_HOST }}
+        username: ${{ secrets.STAGING_USER }}
+        key: ${{ secrets.STAGING_SSH_KEY }}
+        port: ${{ secrets.STAGING_PORT }}
+        script: |
+          cd /opt/portfolio-app
+          
+          # Run smoke tests
+          curl -f http://localhost/health
+          curl -f http://localhost/api/health
+          curl -f http://localhost/api/v1/
+          
+          # Test database connectivity
+          docker-compose -f docker-compose.prod.yml exec -T backend ./main health
+
+    - name: Notify deployment status
+      uses: 8398a7/action-slack@v3
+      if: always()
+      with:
+        status: ${{ job.status }}
+        channel: '#deployments'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        fields: repo,message,commit,author,action,eventName,ref,workflow
+
+  # Deploy to production
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build-and-push, deploy-staging]
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.environment == 'production'
+    environment: production
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up deployment environment
+      run: |
+        # Create production environment file
+        cat > .env.production << EOF
+        DB_NAME=portfolio_db_prod
+        DB_USER=portfolio_user_prod
+        DB_PASSWORD=${{ secrets.PROD_DB_PASSWORD }}
+        REDIS_PASSWORD=${{ secrets.PROD_REDIS_PASSWORD }}
+        JWT_SECRET=${{ secrets.PROD_JWT_SECRET }}
+        MARKET_DATA_API_KEY=${{ secrets.MARKET_DATA_API_KEY }}
+        API_URL=https://your-domain.com/api
+        BACKEND_IMAGE=${{ needs.build-and-push.outputs.backend-image }}
+        FRONTEND_IMAGE=${{ needs.build-and-push.outputs.frontend-image }}
+        EOF
+
+    - name: Create backup before deployment
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.PROD_HOST }}
+        username: ${{ secrets.PROD_USER }}
+        key: ${{ secrets.PROD_SSH_KEY }}
+        port: ${{ secrets.PROD_PORT }}
+        script: |
+          cd /opt/portfolio-app
+          ./scripts/backup.sh
+
+    - name: Deploy to production server
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.PROD_HOST }}
+        username: ${{ secrets.PROD_USER }}
+        key: ${{ secrets.PROD_SSH_KEY }}
+        port: ${{ secrets.PROD_PORT }}
+        script: |
+          # Navigate to application directory
+          cd /opt/portfolio-app
+          
+          # Pull latest code
+          git pull origin main
+          
+          # Update environment
+          cp .env.production .env.prod.local
+          
+          # Login to container registry
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          
+          # Pull latest images
+          docker pull ${{ needs.build-and-push.outputs.backend-image }}
+          docker pull ${{ needs.build-and-push.outputs.frontend-image }}
+          
+          # Update docker-compose with new images
+          sed -i "s|portfolio-backend:.*|${{ needs.build-and-push.outputs.backend-image }}|g" docker-compose.prod.yml
+          sed -i "s|portfolio-frontend:.*|${{ needs.build-and-push.outputs.frontend-image }}|g" docker-compose.prod.yml
+          
+          # Deploy with zero-downtime
+          ./scripts/deploy-prod.sh
+          
+          # Run health check
+          sleep 60
+          curl -f https://your-domain.com/health || exit 1
+
+    - name: Run production smoke tests
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.PROD_HOST }}
+        username: ${{ secrets.PROD_USER }}
+        key: ${{ secrets.PROD_SSH_KEY }}
+        port: ${{ secrets.PROD_PORT }}
+        script: |
+          cd /opt/portfolio-app
+          
+          # Run comprehensive smoke tests
+          curl -f https://your-domain.com/health
+          curl -f https://your-domain.com/api/health
+          curl -f https://your-domain.com/api/v1/
+          
+          # Test database connectivity
+          docker-compose -f docker-compose.prod.yml exec -T backend ./main health
+          
+          # Test Redis connectivity
+          docker-compose -f docker-compose.prod.yml exec -T redis redis-cli ping
+
+    - name: Update deployment status
+      uses: deployments/actions@v1
+      with:
+        step: finish
+        token: ${{ secrets.GITHUB_TOKEN }}
+        status: ${{ job.status }}
+        deployment_id: ${{ steps.deployment.outputs.deployment_id }}
+
+    - name: Notify production deployment
+      uses: 8398a7/action-slack@v3
+      if: always()
+      with:
+        status: ${{ job.status }}
+        channel: '#production'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        fields: repo,message,commit,author,action,eventName,ref,workflow
+        text: |
+          Production deployment ${{ job.status }}!
+          Version: ${{ github.ref }}
+          Commit: ${{ github.sha }}
+
+  # Database migrations
+  migrate-database:
+    name: Run Database Migrations
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+
+    strategy:
+      matrix:
+        environment: [staging, production]
+
+    environment: ${{ matrix.environment }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run database migrations
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ matrix.environment == 'staging' && secrets.STAGING_HOST || secrets.PROD_HOST }}
+        username: ${{ matrix.environment == 'staging' && secrets.STAGING_USER || secrets.PROD_USER }}
+        key: ${{ matrix.environment == 'staging' && secrets.STAGING_SSH_KEY || secrets.PROD_SSH_KEY }}
+        port: ${{ matrix.environment == 'staging' && secrets.STAGING_PORT || secrets.PROD_PORT }}
+        script: |
+          cd /opt/portfolio-app
+          
+          # Backup database before migration
+          ./scripts/backup.sh
+          
+          # Run migrations
+          docker-compose -f docker-compose.prod.yml exec -T backend ./main migrate
+          
+          # Verify migration success
+          docker-compose -f docker-compose.prod.yml exec -T backend ./main health

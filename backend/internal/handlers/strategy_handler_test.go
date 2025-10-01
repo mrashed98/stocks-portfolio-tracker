@@ -75,6 +75,13 @@ func TestStrategyHandler_CreateStrategy(t *testing.T) {
 		mockService := new(MockStrategyService)
 		handler := NewStrategyHandler(mockService)
 		app := fiber.New()
+		
+		// Add middleware to set user context
+		app.Use(func(c *fiber.Ctx) error {
+			c.Locals("userID", uuid.New().String())
+			return c.Next()
+		})
+		
 		app.Post("/strategies", handler.CreateStrategy)
 
 		reqBody := map[string]interface{}{

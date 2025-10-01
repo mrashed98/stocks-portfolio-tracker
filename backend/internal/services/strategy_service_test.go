@@ -400,6 +400,194 @@ func TestStrategyService_ValidateStrategyWeights(t *testing.T) {
 	})
 }
 
+func TestStrategyService_DeleteStrategy(t *testing.T) {
+	userID := uuid.New()
+	strategyID := uuid.New()
+	ctx := context.Background()
+
+	t.Run("successful deletion", func(t *testing.T) {
+		mockRepo := new(MockStrategyRepository)
+		service := NewStrategyService(mockRepo, &sql.DB{})
+
+		mockRepo.On("Delete", ctx, strategyID, userID).Return(nil)
+
+		err := service.DeleteStrategy(ctx, strategyID, userID)
+
+		assert.NoError(t, err)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("strategy not found", func(t *testing.T) {
+		mockRepo := new(MockStrategyRepository)
+		service := NewStrategyService(mockRepo, &sql.DB{})
+
+		mockRepo.On("Delete", ctx, strategyID, userID).Return(&models.NotFoundError{Resource: "strategy"})
+
+		err := service.DeleteStrategy(ctx, strategyID, userID)
+
+		assert.Error(t, err)
+		mockRepo.AssertExpectations(t)
+	})
+}
+
+func TestStrategyService_GetUserStrategies(t *testing.T) {
+	userID := uuid.New()
+	ctx := context.Background()
+
+	t.Run("successful retrieval", func(t *testing.T) {
+		mockRepo := new(MockStrategyRepository)
+		service := NewStrategyService(mockRepo, &sql.DB{})
+
+		expectedStrategies := []*models.Strategy{
+			{
+				ID:          uuid.New(),
+				UserID:      userID,
+				Name:        "Strategy 1",
+				WeightMode:  models.WeightModePercent,
+				WeightValue: decimal.NewFromInt(60),
+			},
+			{
+				ID:          uuid.New(),
+				UserID:      userID,
+				Name:        "Strategy 2",
+				WeightMode:  models.WeightModeBudget,
+				WeightValue: decimal.NewFromInt(5000),
+			},
+		}
+
+		mockRepo.On("GetByUserID", ctx, userID).Return(expectedStrategies, nil)
+
+		result, err := service.GetUserStrategies(ctx, userID)
+
+		assert.NoError(t, err)
+		assert.Len(t, result, 2)
+		assert.Equal(t, "Strategy 1", result[0].Name)
+		assert.Equal(t, "Strategy 2", result[1].Name)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("no strategies found", func(t *testing.T) {
+		mockRepo := new(MockStrategyRepository)
+		service := NewStrategyService(mockRepo, &sql.DB{})
+
+		mockRepo.On("GetByUserID", ctx, userID).Return([]*models.Strategy{}, nil)
+
+		result, err := service.GetUserStrategies(ctx, userID)
+
+		assert.NoError(t, err)
+		assert.Len(t, result, 0)
+		mockRepo.AssertExpectations(t)
+	})
+}
+
+// Note: AddStockToStrategy, RemoveStockFromStrategy, and GetStrategyStocks 
+// are not part of the StrategyService interface. These operations are likely
+// handled by the repository layer directly or through other services.
+
+// Note: ValidateCreateRequest and ValidateUpdateRequest are not part of the 
+// StrategyService interface. Validation is likely handled internally within
+// the CreateStrategy and UpdateStrategy methods.
+
+func TestStrategyService_MixedWeightModes(t *testing.T) {
+	userID := uuid.New()
+	ctx := context.Background()
+
+	t.Run("mixed weight modes validation", func(t *testing.T) {
+		mockRepo := new(MockStrategyRepository)
+		service := NewStrategyService(mockRepo, &sql.DB{})
+
+		// Existing strategies with mixed modes
+		strategies := []*models.Strategy{
+			{
+				ID:          uuid.New(),
+				UserID:      userID,
+				WeightMode:  models.WeightModePercent,
+				WeightValue: decimal.NewFromInt(40),
+			},
+			{
+				ID:          uuid.New(),
+				UserID:      userID,
+				WeightMode:  models.WeightModeBudget,
+				WeightValue: decimal.NewFromInt(3000),
+			},
+		}
+
+		mockRepo.On("GetByUserID", ctx, userID).Return(strategies, nil)
+
+		// Try to add another percentage strategy that would exceed 100%
+		req := &models.CreateStrategyRequest{
+			Name:        "New Strategy",
+			WeightMode:  models.WeightModePercent,
+			WeightValue: decimal.NewFromInt(70), // 40% + 70% = 110%
+		}
+
+		result, err := service.CreateStrategy(ctx, req, userID)
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "Total percentage weights cannot exceed 100%")
+		mockRepo.AssertExpectations(t)
+	})
+}
+
+// Benchmark tests
+func BenchmarkStrategyService_CreateStrategy(b *testing.B) {
+	mockRepo := new(MockStrategyRepository)
+	service := NewStrategyService(mockRepo, &sql.DB{})
+	userID := uuid.New()
+	ctx := context.Background()
+
+	req := &models.CreateStrategyRequest{
+		Name:        "Benchmark Strategy",
+		WeightMode:  models.WeightModeBudget,
+		WeightValue: decimal.NewFromInt(5000),
+	}
+
+	expectedStrategy := &models.Strategy{
+		ID:          uuid.New(),
+		UserID:      userID,
+		Name:        req.Name,
+		WeightMode:  req.WeightMode,
+		WeightValue: req.WeightValue,
+	}
+
+	mockRepo.On("Create", mock.Anything, mock.AnythingOfType("*models.Strategy")).Return(expectedStrategy, nil)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		service.CreateStrategy(ctx, req, userID)
+	}
+}
+
+func BenchmarkStrategyService_ValidateStrategyWeights(b *testing.B) {
+	mockRepo := new(MockStrategyRepository)
+	service := NewStrategyService(mockRepo, &sql.DB{})
+	userID := uuid.New()
+	ctx := context.Background()
+
+	strategies := []*models.Strategy{
+		{
+			ID:          uuid.New(),
+			UserID:      userID,
+			WeightMode:  models.WeightModePercent,
+			WeightValue: decimal.NewFromInt(50),
+		},
+		{
+			ID:          uuid.New(),
+			UserID:      userID,
+			WeightMode:  models.WeightModePercent,
+			WeightValue: decimal.NewFromInt(30),
+		},
+	}
+
+	mockRepo.On("GetByUserID", mock.Anything, userID).Return(strategies, nil)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		service.ValidateStrategyWeights(ctx, userID, nil)
+	}
+}
+
 // Helper function to create string pointers
 func stringPtr(s string) *string {
 	return &s

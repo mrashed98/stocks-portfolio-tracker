@@ -3,29 +3,35 @@ package routes
 import (
 	"github.com/gofiber/fiber/v2"
 	"portfolio-app/internal/handlers"
+	"portfolio-app/internal/middleware"
+	"portfolio-app/internal/repositories"
+	"portfolio-app/internal/services"
 )
 
 // SetupPortfolioRoutes sets up portfolio routes
-func SetupPortfolioRoutes(router fiber.Router, handler *handlers.PortfolioHandler) {
+func SetupPortfolioRoutes(router fiber.Router, handler *handlers.PortfolioHandler, authService *services.AuthService, userRepo repositories.UserRepository) {
 	portfolioGroup := router.Group("/portfolios")
 	
+	// Apply authentication middleware and rate limiting to all portfolio routes
+	protected := portfolioGroup.Group("", middleware.AuthMiddleware(authService, userRepo), middleware.RateLimitMiddleware())
+	
 	// Allocation preview
-	portfolioGroup.Post("/preview", handler.GenerateAllocationPreview)
-	portfolioGroup.Post("/preview/exclusions", handler.GenerateAllocationPreviewWithExclusions)
+	protected.Post("/preview", handler.GenerateAllocationPreview)
+	protected.Post("/preview/exclusions", handler.GenerateAllocationPreviewWithExclusions)
 	
 	// Portfolio CRUD
-	portfolioGroup.Post("/", handler.CreatePortfolio)
-	portfolioGroup.Get("/", handler.GetUserPortfolios)
-	portfolioGroup.Get("/:id", handler.GetPortfolio)
-	portfolioGroup.Put("/:id", handler.UpdatePortfolio)
-	portfolioGroup.Delete("/:id", handler.DeletePortfolio)
+	protected.Post("/", handler.CreatePortfolio)
+	protected.Get("/", handler.GetUserPortfolios)
+	protected.Get("/:id", handler.GetPortfolio)
+	protected.Put("/:id", handler.UpdatePortfolio)
+	protected.Delete("/:id", handler.DeletePortfolio)
 	
 	// Portfolio performance
-	portfolioGroup.Get("/:id/history", handler.GetPortfolioHistory)
-	portfolioGroup.Get("/:id/performance", handler.GetPortfolioPerformance)
-	portfolioGroup.Post("/:id/nav/update", handler.UpdatePortfolioNAV)
+	protected.Get("/:id/history", handler.GetPortfolioHistory)
+	protected.Get("/:id/performance", handler.GetPortfolioPerformance)
+	protected.Post("/:id/nav/update", handler.UpdatePortfolioNAV)
 	
 	// Portfolio rebalancing
-	portfolioGroup.Post("/:id/rebalance/preview", handler.GenerateRebalancePreview)
-	portfolioGroup.Post("/:id/rebalance", handler.RebalancePortfolio)
+	protected.Post("/:id/rebalance/preview", handler.GenerateRebalancePreview)
+	protected.Post("/:id/rebalance", handler.RebalancePortfolio)
 }

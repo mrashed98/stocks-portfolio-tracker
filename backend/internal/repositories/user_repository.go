@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/jmoiron/sqlx"
 
 	"portfolio-app/internal/models"
 )
@@ -23,11 +22,11 @@ type UserRepository interface {
 
 // userRepository implements UserRepository
 type userRepository struct {
-	db *sqlx.DB
+	db *sql.DB
 }
 
 // NewUserRepository creates a new UserRepository
-func NewUserRepository(db *sqlx.DB) UserRepository {
+func NewUserRepository(db *sql.DB) UserRepository {
 	return &userRepository{db: db}
 }
 
@@ -39,9 +38,11 @@ func (r *userRepository) Create(ctx context.Context, user *models.User) (*models
 		RETURNING id, name, email, password_hash, created_at, updated_at`
 
 	var createdUser models.User
-	err := r.db.GetContext(ctx, &createdUser, query,
+	err := r.db.QueryRowContext(ctx, query,
 		user.ID, user.Name, user.Email, user.PasswordHash,
-		user.CreatedAt, user.UpdatedAt)
+		user.CreatedAt, user.UpdatedAt).Scan(
+		&createdUser.ID, &createdUser.Name, &createdUser.Email,
+		&createdUser.PasswordHash, &createdUser.CreatedAt, &createdUser.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
@@ -57,7 +58,9 @@ func (r *userRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Use
 		WHERE id = $1`
 
 	var user models.User
-	err := r.db.GetContext(ctx, &user, query, id)
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&user.ID, &user.Name, &user.Email,
+		&user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -76,7 +79,9 @@ func (r *userRepository) GetByEmail(ctx context.Context, email string) (*models.
 		WHERE email = $1`
 
 	var user models.User
-	err := r.db.GetContext(ctx, &user, query, email)
+	err := r.db.QueryRowContext(ctx, query, email).Scan(
+		&user.ID, &user.Name, &user.Email,
+		&user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -111,39 +116,32 @@ func (r *userRepository) Update(ctx context.Context, id uuid.UUID, req *models.U
 	}
 
 	// Add updated_at
-	setParts = append(setParts, fmt.Sprintf("updated_at = NOW()"))
+	setParts = append(setParts, "updated_at = NOW()")
 
 	// Add WHERE clause
 	args = append(args, id)
 	whereClause := fmt.Sprintf("WHERE id = $%d", argIndex)
+
+	// Build full SET clause
+	setClause := ""
+	for i, part := range setParts {
+		if i > 0 {
+			setClause += ", "
+		}
+		setClause += part
+	}
 
 	query := fmt.Sprintf(`
 		UPDATE users
 		SET %s
 		%s
 		RETURNING id, name, email, password_hash, created_at, updated_at`,
-		fmt.Sprintf("%s", setParts[0]),
-		whereClause)
-
-	// Build full SET clause
-	if len(setParts) > 1 {
-		setClause := ""
-		for i, part := range setParts {
-			if i > 0 {
-				setClause += ", "
-			}
-			setClause += part
-		}
-		query = fmt.Sprintf(`
-			UPDATE users
-			SET %s
-			%s
-			RETURNING id, name, email, password_hash, created_at, updated_at`,
-			setClause, whereClause)
-	}
+		setClause, whereClause)
 
 	var user models.User
-	err := r.db.GetContext(ctx, &user, query, args...)
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(
+		&user.ID, &user.Name, &user.Email,
+		&user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -183,10 +181,26 @@ func (r *userRepository) List(ctx context.Context, limit, offset int) ([]*models
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2`
 
-	var users []*models.User
-	err := r.db.SelectContext(ctx, &users, query, limit, offset)
+	rows, err := r.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []*models.User
+	for rows.Next() {
+		var user models.User
+		err := rows.Scan(
+			&user.ID, &user.Name, &user.Email,
+			&user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan user: %w", err)
+		}
+		users = append(users, &user)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate rows: %w", err)
 	}
 
 	return users, nil

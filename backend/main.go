@@ -83,9 +83,10 @@ func main() {
 	// Middleware
 	app.Use(logger.New())
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: "http://localhost:3000",
-		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
-		AllowMethods: "GET, POST, PUT, DELETE, OPTIONS",
+		AllowOrigins:     "http://localhost:3000,http://localhost:5173", // Include Vite dev server
+		AllowHeaders:     "Origin, Content-Type, Accept, Authorization, X-Requested-With",
+		AllowMethods:     "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+		AllowCredentials: true,
 	}))
 
 	// Health check endpoint
@@ -169,11 +170,11 @@ func main() {
 
 	// Setup routes
 	routes.SetupAuthRoutes(api, authHandler, authService, userRepo)
-	routes.SetupStrategyRoutes(api, strategyHandler)
-	routes.SetupStockRoutes(api, stockHandler)
-	routes.SetupMarketDataRoutes(api, marketDataHandler)
-	routes.SetupPortfolioRoutes(api, portfolioHandler)
-	routes.SetupNAVSchedulerRoutes(api, navSchedulerHandler)
+	routes.SetupStrategyRoutes(api, strategyHandler, authService, userRepo)
+	routes.SetupStockRoutes(api, stockHandler, authService, userRepo)
+	routes.SetupMarketDataRoutes(api, marketDataHandler, authService, userRepo)
+	routes.SetupPortfolioRoutes(api, portfolioHandler, authService, userRepo)
+	routes.SetupNAVSchedulerRoutes(api, navSchedulerHandler, authService, userRepo)
 
 	// Start server
 	port := os.Getenv("PORT")

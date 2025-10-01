@@ -1,0 +1,110 @@
+name: Automated Backup
+
+on:
+  schedule:
+    - cron: '0 3 * * *'  # Daily at 3 AM
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to backup'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - staging
+        - production
+
+jobs:
+  backup:
+    name: Database Backup
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        environment: [staging, production]
+        exclude:
+          - environment: ${{ github.event.inputs.environment && github.event.inputs.environment != 'staging' && 'staging' || 'none' }}
+          - environment: ${{ github.event.inputs.environment && github.event.inputs.environment != 'production' && 'production' || 'none' }}
+
+    environment: ${{ matrix.environment }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run backup on server
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ matrix.environment == 'staging' && secrets.STAGING_HOST || secrets.PROD_HOST }}
+        username: ${{ matrix.environment == 'staging' && secrets.STAGING_USER || secrets.PROD_USER }}
+        key: ${{ matrix.environment == 'staging' && secrets.STAGING_SSH_KEY || secrets.PROD_SSH_KEY }}
+        port: ${{ matrix.environment == 'staging' && secrets.STAGING_PORT || secrets.PROD_PORT }}
+        script: |
+          cd /opt/portfolio-app
+          ./scripts/backup.sh
+
+    - name: Upload backup to cloud storage
+      uses: appleboy/ssh-action@v1.0.0
+      if: matrix.environment == 'production'
+      with:
+        host: ${{ secrets.PROD_HOST }}
+        username: ${{ secrets.PROD_USER }}
+        key: ${{ secrets.PROD_SSH_KEY }}
+        port: ${{ secrets.PROD_PORT }}
+        script: |
+          cd /opt/portfolio-app
+          
+          # Configure AWS CLI (if using S3)
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws configure set default.region ${{ secrets.AWS_DEFAULT_REGION }}
+          
+          # Upload latest backup to S3
+          LATEST_BACKUP=$(ls -t backups/ | head -n 1)
+          aws s3 cp "backups/$LATEST_BACKUP" "s3://${{ secrets.BACKUP_BUCKET }}/portfolio-app/$(date +%Y/%m/%d)/"
+          
+          # Clean up local backups older than 7 days
+          find backups/ -name "*.sql" -mtime +7 -delete
+          find backups/ -name "*.tar.gz" -mtime +7 -delete
+
+    - name: Verify backup integrity
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ matrix.environment == 'staging' && secrets.STAGING_HOST || secrets.PROD_HOST }}
+        username: ${{ matrix.environment == 'staging' && secrets.STAGING_USER || secrets.PROD_USER }}
+        key: ${{ matrix.environment == 'staging' && secrets.STAGING_SSH_KEY || secrets.PROD_SSH_KEY }}
+        port: ${{ matrix.environment == 'staging' && secrets.STAGING_PORT || secrets.PROD_PORT }}
+        script: |
+          cd /opt/portfolio-app
+          
+          # Get latest backup file
+          LATEST_BACKUP=$(ls -t backups/*.sql | head -n 1)
+          
+          # Verify backup file is not empty and contains expected content
+          if [ -s "$LATEST_BACKUP" ]; then
+            echo "Backup file exists and is not empty"
+            
+            # Check if backup contains expected tables
+            if grep -q "CREATE TABLE" "$LATEST_BACKUP"; then
+              echo "Backup contains table definitions"
+            else
+              echo "ERROR: Backup does not contain table definitions"
+              exit 1
+            fi
+          else
+            echo "ERROR: Backup file is empty or does not exist"
+            exit 1
+          fi
+
+    - name: Notify backup status
+      uses: 8398a7/action-slack@v3
+      if: always()
+      with:
+        status: ${{ job.status }}
+        channel: '#backups'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        fields: repo,message,commit,author,action,eventName,ref,workflow
+        text: |
+          ${{ matrix.environment }} backup ${{ job.status }}!
+          Environment: ${{ matrix.environment }}
+          Time: ${{ github.event.schedule || 'Manual trigger' }}

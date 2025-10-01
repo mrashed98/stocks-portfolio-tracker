@@ -6,6 +6,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"portfolio-app/internal/middleware"
 	"portfolio-app/internal/models"
 	"portfolio-app/internal/services"
 )
@@ -339,8 +340,13 @@ func (h *StockHandler) GetStockSignalHistory(c *fiber.Ctx) error {
 
 // AddStockToStrategy handles POST /stocks/:id/strategies/:strategyId
 func (h *StockHandler) AddStockToStrategy(c *fiber.Ctx) error {
-	// TODO: Extract user ID from JWT token when authentication is implemented
-	userID := uuid.New()
+	// Extract user ID from JWT token (set by auth middleware)
+	userID, ok := middleware.GetUserIDFromContext(c)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "User authentication required",
+		})
+	}
 
 	stockID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
@@ -377,8 +383,13 @@ func (h *StockHandler) AddStockToStrategy(c *fiber.Ctx) error {
 
 // RemoveStockFromStrategy handles DELETE /stocks/:id/strategies/:strategyId
 func (h *StockHandler) RemoveStockFromStrategy(c *fiber.Ctx) error {
-	// TODO: Extract user ID from JWT token when authentication is implemented
-	userID := uuid.New()
+	// Extract user ID from JWT token (set by auth middleware)
+	userID, ok := middleware.GetUserIDFromContext(c)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "User authentication required",
+		})
+	}
 
 	stockID, err := uuid.Parse(c.Params("id"))
 	if err != nil {

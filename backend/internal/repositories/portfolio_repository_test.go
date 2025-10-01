@@ -18,7 +18,7 @@ func TestPortfolioRepository_Create(t *testing.T) {
 	db := testutils.SetupTestDB(t)
 	defer testutils.CleanupTestDB(t, db)
 
-	repo := NewPortfolioRepository(db)
+	repo := NewPortfolioRepository(db.DB)
 	ctx := context.Background()
 
 	// Create test portfolio
@@ -48,7 +48,7 @@ func TestPortfolioRepository_GetByID(t *testing.T) {
 	db := testutils.SetupTestDB(t)
 	defer testutils.CleanupTestDB(t, db)
 
-	repo := NewPortfolioRepository(db)
+	repo := NewPortfolioRepository(db.DB)
 	ctx := context.Background()
 
 	// Test getting non-existent portfolio
@@ -61,7 +61,7 @@ func TestPortfolioRepository_GetByUserID(t *testing.T) {
 	db := testutils.SetupTestDB(t)
 	defer testutils.CleanupTestDB(t, db)
 
-	repo := NewPortfolioRepository(db)
+	repo := NewPortfolioRepository(db.DB)
 	ctx := context.Background()
 
 	userID := uuid.New()
@@ -103,7 +103,7 @@ func TestPortfolioRepository_Update(t *testing.T) {
 	db := testutils.SetupTestDB(t)
 	defer testutils.CleanupTestDB(t, db)
 
-	repo := NewPortfolioRepository(db)
+	repo := NewPortfolioRepository(db.DB)
 	ctx := context.Background()
 
 	// Create test portfolio
@@ -137,7 +137,7 @@ func TestPortfolioRepository_Delete(t *testing.T) {
 	db := testutils.SetupTestDB(t)
 	defer testutils.CleanupTestDB(t, db)
 
-	repo := NewPortfolioRepository(db)
+	repo := NewPortfolioRepository(db.DB)
 	ctx := context.Background()
 
 	// Create test portfolio
@@ -166,7 +166,7 @@ func TestPortfolioRepository_CreatePosition(t *testing.T) {
 	db := testutils.SetupTestDB(t)
 	defer testutils.CleanupTestDB(t, db)
 
-	repo := NewPortfolioRepository(db)
+	repo := NewPortfolioRepository(db.DB)
 	ctx := context.Background()
 
 	// Create test portfolio and stock
@@ -215,7 +215,7 @@ func TestPortfolioRepository_GetPositions(t *testing.T) {
 	db := testutils.SetupTestDB(t)
 	defer testutils.CleanupTestDB(t, db)
 
-	repo := NewPortfolioRepository(db)
+	repo := NewPortfolioRepository(db.DB)
 	ctx := context.Background()
 
 	// Create test portfolio
@@ -241,7 +241,7 @@ func TestPortfolioRepository_CreateNAVHistory(t *testing.T) {
 	db := testutils.SetupTestDB(t)
 	defer testutils.CleanupTestDB(t, db)
 
-	repo := NewPortfolioRepository(db)
+	repo := NewPortfolioRepository(db.DB)
 	ctx := context.Background()
 
 	// Create test portfolio
@@ -285,7 +285,7 @@ func TestPortfolioRepository_GetNAVHistory(t *testing.T) {
 	db := testutils.SetupTestDB(t)
 	defer testutils.CleanupTestDB(t, db)
 
-	repo := NewPortfolioRepository(db)
+	repo := NewPortfolioRepository(db.DB)
 	ctx := context.Background()
 
 	// Create test portfolio
@@ -348,7 +348,7 @@ func TestPortfolioRepository_GetLatestNAV(t *testing.T) {
 	db := testutils.SetupTestDB(t)
 	defer testutils.CleanupTestDB(t, db)
 
-	repo := NewPortfolioRepository(db)
+	repo := NewPortfolioRepository(db.DB)
 	ctx := context.Background()
 
 	// Create test portfolio
@@ -374,7 +374,7 @@ func TestPortfolioRepository_GetAllPortfolioIDs(t *testing.T) {
 	db := testutils.SetupTestDB(t)
 	defer testutils.CleanupTestDB(t, db)
 
-	repo := NewPortfolioRepository(db)
+	repo := NewPortfolioRepository(db.DB)
 	ctx := context.Background()
 
 	// Test getting portfolio IDs when none exist
@@ -435,7 +435,7 @@ func TestPortfolioRepository_CreatePortfolioWithPositions(t *testing.T) {
 	db := testutils.SetupTestDB(t)
 	defer testutils.CleanupTestDB(t, db)
 
-	repo := NewPortfolioRepository(db)
+	repo := NewPortfolioRepository(db.DB)
 	ctx := context.Background()
 
 	// Create test stocks

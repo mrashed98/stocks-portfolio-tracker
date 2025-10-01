@@ -156,7 +156,7 @@ func (h *AuthHandler) GetProfile(c *fiber.Ctx) error {
 // UpdateProfile updates the current user's profile
 func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
 	// Get user ID from context (set by auth middleware)
-	userID, ok := c.Locals("userID").(uuid.UUID)
+	_, ok := c.Locals("userID").(uuid.UUID)
 	if !ok {
 		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Unauthorized",

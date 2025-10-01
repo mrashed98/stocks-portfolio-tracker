@@ -864,3 +864,171 @@ func TestPortfolioService_ValidateAllocationRequest(t *testing.T) {
 		})
 	}
 }
+
+func TestPortfolioService_GetPortfolioHistory(t *testing.T) {
+	// Setup mocks
+	mockRepo := &MockPortfolioRepository{}
+	service := NewPortfolioService(nil, nil, mockRepo, nil)
+
+	ctx := context.Background()
+	portfolioID := uuid.New()
+	from := time.Now().Add(-30 * 24 * time.Hour)
+	to := time.Now()
+
+	expectedHistory := []*models.NAVHistory{
+		{
+			PortfolioID: portfolioID,
+			Timestamp:   from,
+			NAV:         decimal.NewFromFloat(10000.00),
+			PnL:         decimal.Zero,
+		},
+		{
+			PortfolioID: portfolioID,
+			Timestamp:   to,
+			NAV:         decimal.NewFromFloat(11500.00),
+			PnL:         decimal.NewFromFloat(1500.00),
+		},
+	}
+
+	mockRepo.On("GetNAVHistory", ctx, portfolioID, from, to).Return(expectedHistory, nil)
+
+	result, err := service.GetPortfolioHistory(ctx, portfolioID, from, to)
+
+	require.NoError(t, err)
+	assert.Len(t, result, 2)
+	assert.Equal(t, expectedHistory[0].NAV, result[0].NAV)
+	assert.Equal(t, expectedHistory[1].NAV, result[1].NAV)
+
+	mockRepo.AssertExpectations(t)
+}
+
+func TestPortfolioService_GetUserPortfolios(t *testing.T) {
+	// Setup mocks
+	mockRepo := &MockPortfolioRepository{}
+	service := NewPortfolioService(nil, nil, mockRepo, nil)
+
+	ctx := context.Background()
+	userID := uuid.New()
+
+	expectedPortfolios := []*models.Portfolio{
+		{
+			ID:              uuid.New(),
+			UserID:          userID,
+			Name:            "Portfolio 1",
+			TotalInvestment: decimal.NewFromFloat(10000.00),
+		},
+		{
+			ID:              uuid.New(),
+			UserID:          userID,
+			Name:            "Portfolio 2",
+			TotalInvestment: decimal.NewFromFloat(20000.00),
+		},
+	}
+
+	mockRepo.On("GetByUserID", ctx, userID).Return(expectedPortfolios, nil)
+
+	result, err := service.GetUserPortfolios(ctx, userID)
+
+	require.NoError(t, err)
+	assert.Len(t, result, 2)
+	assert.Equal(t, "Portfolio 1", result[0].Name)
+	assert.Equal(t, "Portfolio 2", result[1].Name)
+
+	mockRepo.AssertExpectations(t)
+}
+
+func TestPortfolioService_MarketDataFailure(t *testing.T) {
+	// Test graceful handling of market data failures
+	mockRepo := &MockPortfolioRepository{}
+	mockMarketDataService := &MockTestMarketDataService{}
+	service := NewPortfolioService(nil, nil, mockRepo, mockMarketDataService)
+
+	ctx := context.Background()
+	portfolioID := uuid.New()
+	stockID := uuid.New()
+
+	portfolio := &models.Portfolio{
+		ID:              portfolioID,
+		UserID:          uuid.New(),
+		Name:            "Test Portfolio",
+		TotalInvestment: decimal.NewFromFloat(10000.00),
+		Positions: []models.Position{
+			{
+				PortfolioID:     portfolioID,
+				StockID:         stockID,
+				Quantity:        100,
+				EntryPrice:      decimal.NewFromFloat(100.00),
+				AllocationValue: decimal.NewFromFloat(10000.00),
+				Stock: &models.Stock{
+					ID:     stockID,
+					Ticker: "AAPL",
+					Name:   "Apple Inc.",
+				},
+			},
+		},
+	}
+
+	// Setup expectations - market data service fails
+	mockRepo.On("GetByID", ctx, portfolioID).Return(portfolio, nil)
+	mockMarketDataService.On("GetMultipleQuotes", ctx, []string{"AAPL"}).Return(nil, assert.AnError)
+
+	// Execute
+	result, err := service.GetPortfolio(ctx, portfolioID)
+
+	// Should still return portfolio but without current prices
+	require.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, portfolioID, result.ID)
+	assert.Len(t, result.Positions, 1)
+	assert.Nil(t, result.Positions[0].CurrentPrice) // No current price due to market data failure
+
+	mockRepo.AssertExpectations(t)
+	mockMarketDataService.AssertExpectations(t)
+}
+
+// Benchmark tests
+func BenchmarkPortfolioService_GetPortfolio(b *testing.B) {
+	mockRepo := &MockPortfolioRepository{}
+	mockMarketDataService := &MockTestMarketDataService{}
+	service := NewPortfolioService(nil, nil, mockRepo, mockMarketDataService)
+
+	ctx := context.Background()
+	portfolioID := uuid.New()
+	stockID := uuid.New()
+
+	portfolio := &models.Portfolio{
+		ID:              portfolioID,
+		UserID:          uuid.New(),
+		Name:            "Benchmark Portfolio",
+		TotalInvestment: decimal.NewFromFloat(10000.00),
+		Positions: []models.Position{
+			{
+				PortfolioID:     portfolioID,
+				StockID:         stockID,
+				Quantity:        100,
+				EntryPrice:      decimal.NewFromFloat(100.00),
+				AllocationValue: decimal.NewFromFloat(10000.00),
+				Stock: &models.Stock{
+					ID:     stockID,
+					Ticker: "AAPL",
+					Name:   "Apple Inc.",
+				},
+			},
+		},
+	}
+
+	quotes := map[string]*Quote{
+		"AAPL": {
+			Symbol: "AAPL",
+			Price:  decimal.NewFromFloat(150.00),
+		},
+	}
+
+	mockRepo.On("GetByID", mock.Anything, portfolioID).Return(portfolio, nil)
+	mockMarketDataService.On("GetMultipleQuotes", mock.Anything, []string{"AAPL"}).Return(quotes, nil)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		service.GetPortfolio(ctx, portfolioID)
+	}
+}

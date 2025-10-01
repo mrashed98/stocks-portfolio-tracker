@@ -6,6 +6,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
+	"portfolio-app/internal/middleware"
 	"portfolio-app/internal/models"
 	"portfolio-app/internal/services"
 )
@@ -24,9 +25,13 @@ func NewStrategyHandler(strategyService services.StrategyService) *StrategyHandl
 
 // CreateStrategy handles POST /strategies
 func (h *StrategyHandler) CreateStrategy(c *fiber.Ctx) error {
-	// TODO: Extract user ID from JWT token when authentication is implemented
-	// For now, using a placeholder user ID
-	userID := uuid.New()
+	// Extract user ID from JWT token (set by auth middleware)
+	userID, ok := middleware.GetUserIDFromContext(c)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "User authentication required",
+		})
+	}
 
 	var req models.CreateStrategyRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -65,8 +70,13 @@ func (h *StrategyHandler) CreateStrategy(c *fiber.Ctx) error {
 
 // GetStrategies handles GET /strategies
 func (h *StrategyHandler) GetStrategies(c *fiber.Ctx) error {
-	// TODO: Extract user ID from JWT token when authentication is implemented
-	userID := uuid.New()
+	// Extract user ID from JWT token (set by auth middleware)
+	userID, ok := middleware.GetUserIDFromContext(c)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "User authentication required",
+		})
+	}
 
 	strategies, err := h.strategyService.GetUserStrategies(c.Context(), userID)
 	if err != nil {
@@ -89,8 +99,13 @@ func (h *StrategyHandler) GetStrategies(c *fiber.Ctx) error {
 
 // GetStrategy handles GET /strategies/:id
 func (h *StrategyHandler) GetStrategy(c *fiber.Ctx) error {
-	// TODO: Extract user ID from JWT token when authentication is implemented
-	userID := uuid.New()
+	// Extract user ID from JWT token (set by auth middleware)
+	userID, ok := middleware.GetUserIDFromContext(c)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "User authentication required",
+		})
+	}
 
 	strategyID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
@@ -118,8 +133,13 @@ func (h *StrategyHandler) GetStrategy(c *fiber.Ctx) error {
 
 // UpdateStrategy handles PUT /strategies/:id
 func (h *StrategyHandler) UpdateStrategy(c *fiber.Ctx) error {
-	// TODO: Extract user ID from JWT token when authentication is implemented
-	userID := uuid.New()
+	// Extract user ID from JWT token (set by auth middleware)
+	userID, ok := middleware.GetUserIDFromContext(c)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "User authentication required",
+		})
+	}
 
 	strategyID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
@@ -171,8 +191,13 @@ func (h *StrategyHandler) UpdateStrategy(c *fiber.Ctx) error {
 
 // DeleteStrategy handles DELETE /strategies/:id
 func (h *StrategyHandler) DeleteStrategy(c *fiber.Ctx) error {
-	// TODO: Extract user ID from JWT token when authentication is implemented
-	userID := uuid.New()
+	// Extract user ID from JWT token (set by auth middleware)
+	userID, ok := middleware.GetUserIDFromContext(c)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "User authentication required",
+		})
+	}
 
 	strategyID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
@@ -200,8 +225,13 @@ func (h *StrategyHandler) DeleteStrategy(c *fiber.Ctx) error {
 
 // UpdateStrategyWeight handles PUT /strategies/:id/weight
 func (h *StrategyHandler) UpdateStrategyWeight(c *fiber.Ctx) error {
-	// TODO: Extract user ID from JWT token when authentication is implemented
-	userID := uuid.New()
+	// Extract user ID from JWT token (set by auth middleware)
+	userID, ok := middleware.GetUserIDFromContext(c)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "User authentication required",
+		})
+	}
 
 	strategyID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
@@ -268,8 +298,13 @@ func (h *StrategyHandler) UpdateStrategyWeight(c *fiber.Ctx) error {
 
 // UpdateStockEligibility handles PUT /strategies/:id/stocks/:stockId
 func (h *StrategyHandler) UpdateStockEligibility(c *fiber.Ctx) error {
-	// TODO: Extract user ID from JWT token when authentication is implemented
-	userID := uuid.New()
+	// Extract user ID from JWT token (set by auth middleware)
+	userID, ok := middleware.GetUserIDFromContext(c)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "User authentication required",
+		})
+	}
 
 	strategyID, err := uuid.Parse(c.Params("id"))
 	if err != nil {

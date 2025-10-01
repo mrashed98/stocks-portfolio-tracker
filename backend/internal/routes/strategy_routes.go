@@ -3,22 +3,28 @@ package routes
 import (
 	"github.com/gofiber/fiber/v2"
 	"portfolio-app/internal/handlers"
+	"portfolio-app/internal/middleware"
+	"portfolio-app/internal/repositories"
+	"portfolio-app/internal/services"
 )
 
 // SetupStrategyRoutes sets up all strategy-related routes
-func SetupStrategyRoutes(app fiber.Router, strategyHandler *handlers.StrategyHandler) {
+func SetupStrategyRoutes(app fiber.Router, strategyHandler *handlers.StrategyHandler, authService *services.AuthService, userRepo repositories.UserRepository) {
 	strategies := app.Group("/strategies")
 
+	// Apply authentication middleware and rate limiting to all strategy routes
+	protected := strategies.Group("", middleware.AuthMiddleware(authService, userRepo), middleware.RateLimitMiddleware())
+
 	// Strategy CRUD operations
-	strategies.Post("/", strategyHandler.CreateStrategy)
-	strategies.Get("/", strategyHandler.GetStrategies)
-	strategies.Get("/:id", strategyHandler.GetStrategy)
-	strategies.Put("/:id", strategyHandler.UpdateStrategy)
-	strategies.Delete("/:id", strategyHandler.DeleteStrategy)
+	protected.Post("/", strategyHandler.CreateStrategy)
+	protected.Get("/", strategyHandler.GetStrategies)
+	protected.Get("/:id", strategyHandler.GetStrategy)
+	protected.Put("/:id", strategyHandler.UpdateStrategy)
+	protected.Delete("/:id", strategyHandler.DeleteStrategy)
 
 	// Strategy weight management
-	strategies.Put("/:id/weight", strategyHandler.UpdateStrategyWeight)
+	protected.Put("/:id/weight", strategyHandler.UpdateStrategyWeight)
 
 	// Stock assignment and eligibility management
-	strategies.Put("/:id/stocks/:stockId", strategyHandler.UpdateStockEligibility)
+	protected.Put("/:id/stocks/:stockId", strategyHandler.UpdateStockEligibility)
 }
